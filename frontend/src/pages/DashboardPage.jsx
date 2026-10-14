@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import MetricCard from '../components/common/MetricCard';
 import StatusBadge from '../components/common/StatusBadge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
-import AlertMessage from '../components/common/AlertMessage';
 import ApplicationModal from '../components/applications/ApplicationModal';
 import ApplicationDetailModal from '../components/applications/ApplicationDetailModal';
 import InterviewModal from '../components/interviews/InterviewModal';
 import { dashboardService } from '../services/dashboardService';
+import { useRetryableFetch, MAX_AUTO_RETRIES } from '../hooks/useRetryableFetch';
 import {
   Briefcase,
   Calendar,
@@ -21,6 +21,7 @@ import {
   Plus,
   ArrowRight,
   ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -49,9 +50,23 @@ export default function DashboardPage() {
   const { openMobileSidebar } = useOutletContext();
   const navigate = useNavigate();
 
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  /**
+   * useRetryableFetch handles:
+   * - Loading state while the initial request is in progress
+   * - Automatic retries when the backend is sleeping on Render's free tier
+   * - A manual retry() function for the "Retry Now" button
+   *
+   * IMPORTANT: Only GET functions should be passed here.
+   * POST/PUT/DELETE actions in modals do their own error handling
+   * and must never be auto-retried (risk of duplicate records).
+   */
+  const {
+    data: summary,
+    loading,
+    error,
+    retryCount,
+    retry: fetchDashboard,
+  } = useRetryableFetch(dashboardService.getSummary);
 
   // Modals
   const [isAppModalOpen, setIsAppModalOpen] = useState(false);
@@ -59,23 +74,6 @@ export default function DashboardPage() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isInterviewModalOpen, setIsInterviewModalOpen] = useState(false);
   const [interviewAppId, setInterviewAppId] = useState(null);
-
-  const fetchDashboard = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const data = await dashboardService.getSummary();
-      setSummary(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   // Format status counts for Recharts
   const statusChartData = summary?.statusCounts
@@ -102,16 +100,38 @@ export default function DashboardPage() {
       />
 
       <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto space-y-6">
-        {error && (
-          <AlertMessage
-            type="error"
-            message={error}
-            onClose={() => setError('')}
-          />
-        )}
-
         {loading ? (
-          <LoadingSpinner message="Calculating dashboard statistics from database..." />
+          // Show retry progress so the user knows something is actively happening.
+          <LoadingSpinner
+            message={
+              retryCount > 0
+                ? `Backend is starting up\u2026 retrying (${retryCount} / ${MAX_AUTO_RETRIES})`
+                : 'Loading dashboard statistics\u2026'
+            }
+          />
+        ) : error ? (
+          // All automatic retries exhausted. Show an error panel with a Retry button.
+          // We intentionally hide the metric cards here because showing zeros would
+          // be misleading -- the zeros come from a failed request, not real data.
+          <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
+            <div className="w-14 h-14 rounded-full bg-rose-100 flex items-center justify-center mb-4">
+              <AlertCircle className="w-7 h-7 text-rose-500" />
+            </div>
+            <h2 className="text-base font-bold text-slate-800 mb-1">Backend Unavailable</h2>
+            <p className="text-sm text-slate-500 max-w-sm mb-2">{error.message}</p>
+            <p className="text-xs text-slate-400 mb-6">
+              Render&apos;s free tier may be starting up &mdash; this usually takes 30&ndash;60 seconds.
+              Tried {MAX_AUTO_RETRIES} times automatically.
+            </p>
+            <button
+              id="dashboard-retry-btn"
+              onClick={fetchDashboard}
+              className="px-5 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 transition-colors inline-flex items-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Retry Now
+            </button>
+          </div>
         ) : !summary || summary.totalApplications === 0 ? (
           <div className="space-y-6">
             {/* Quick Metrics when empty */}

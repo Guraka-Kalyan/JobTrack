@@ -13,26 +13,37 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     let errorMessage = 'An unexpected error occurred.';
+    const appError = new Error();
+
     if (error.response) {
-      // Backend returned an error response (e.g. 400, 404, 500)
+      // Backend returned an HTTP error response (e.g. 400, 404, 500)
+      appError.statusCode = error.response.status;
+
       if (error.response.data) {
         if (error.response.data.fieldErrors) {
-          // Format validation errors into a friendly message
+          // Format validation errors into a readable message
           const fieldErrors = Object.entries(error.response.data.fieldErrors)
             .map(([field, msg]) => `${field}: ${msg}`)
             .join(' | ');
           errorMessage = `Validation error: ${fieldErrors}`;
         } else if (error.response.data.message) {
           errorMessage = error.response.data.message;
+        } else {
+          errorMessage = `Server error (${error.response.status})`;
         }
       }
     } else if (error.request) {
-      // The request was made but no response was received (e.g. backend server is down)
-      errorMessage = 'Unable to reach backend server. Please verify Spring Boot is running on port 8080.';
+      // Request was sent but no response received — server may be sleeping (Render free tier)
+      // isNetworkError=true signals to the retry hook that this is safe to retry automatically.
+      errorMessage =
+        'Unable to reach the backend. The server may be starting up — please wait a moment.';
+      appError.isNetworkError = true;
     } else {
       errorMessage = error.message;
     }
-    return Promise.reject(new Error(errorMessage));
+
+    appError.message = errorMessage;
+    return Promise.reject(appError);
   }
 );
 
