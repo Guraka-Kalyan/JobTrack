@@ -4,6 +4,7 @@ import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.enums.EmploymentType;
 import com.jobtrack.enums.WorkMode;
 import jakarta.persistence.*;
+import org.hibernate.annotations.BatchSize;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -83,7 +84,19 @@ public class JobApplication {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    /**
+     * @BatchSize tells Hibernate to load this lazy collection in batches using
+     * a single IN-clause query instead of one SELECT per parent entity.
+     *
+     * Without it: mapping 5 recent applications to DTOs fires 5 extra queries
+     *   SELECT * FROM interviews WHERE job_application_id = 1
+     *   SELECT * FROM interviews WHERE job_application_id = 2  ... etc.
+     *
+     * With it: Hibernate loads all needed interview lists in one batched query
+     *   SELECT * FROM interviews WHERE job_application_id IN (1, 2, 3, 4, 5)
+     */
     @OneToMany(mappedBy = "jobApplication", cascade = CascadeType.ALL, orphanRemoval = true)
+    @BatchSize(size = 20)
     private List<Interview> interviews = new ArrayList<>();
 
     public JobApplication() {
